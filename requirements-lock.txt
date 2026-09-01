@@ -1,0 +1,5 @@
+numpy==2.5.2
+scipy==1.18.1
+mujoco==3.12.0
+PySide6==6.11.2
+pytest==9.1.1

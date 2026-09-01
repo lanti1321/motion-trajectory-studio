@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+*.tar.gz
+model_library/*
+!model_library/README.md
+!model_library/OpenArm_V1/
+!model_library/OpenArm_V1/**
+hardware_controller/build/

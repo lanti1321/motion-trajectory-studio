@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "motion-trajectory-studio"
+version = "0.1.0"
+description = "Model-independent desktop editor for sampled motion trajectories"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "mujoco>=3.0",
+  "PySide6>=6.6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+motion-trajectory-studio = "studio.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["studio*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
