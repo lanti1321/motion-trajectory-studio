@@ -33,7 +33,7 @@ Ubuntu 上可安装以下常用系统软件包：
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-venv build-essential cmake iproute2
+sudo apt install python3 python3-venv build-essential cmake iproute2 libxcb-cursor0
 ```
 
 ### 克隆与安装
@@ -46,7 +46,9 @@ bash run.sh
 ```
 
 `install.sh` 会在仓库内创建 `.venv`，安装 `requirements-lock.txt` 中锁定的依赖，
-并以可编辑模式安装应用。它不会修改 `vr_control` 或其他同级仓库。如需指定 Python：
+并以可编辑模式安装应用。它不会修改 `vr_control` 或其他同级仓库。需要 Python
+3.12 或 3.13；conda `base` 若是 3.14，锁文件中的 wheel 装不上。脚本会优先使用
+`python3.12` / `python3.13`。如需指定 Python：
 
 ```bash
 MOTION_STUDIO_PYTHON=/usr/bin/python3.12 bash install.sh
@@ -57,10 +59,11 @@ MOTION_STUDIO_PYTHON=/usr/bin/python3.12 bash install.sh
 
 ### 模型和轨迹属于用户数据
 
-仓库内置 `model_library/OpenArm_V1` 作为可直接加载的保底模型，包含其 MJCF 文件
-和 mesh。其他本机机器人模型、轨迹、工程、相机录像及生成的打包文件不会上传。
-Git 仍会忽略 `model_library/*`，但会保留 README 和内置的 `OpenArm_V1`。克隆后
-可以直接双击 `OpenArm_V1`，也可以通过以下方式添加其他模型：
+仓库内置 `model_library/OpenArm_V1`（达妙夹爪）和 `model_library/OpenArm_O6`
+（灵心 O6 灵巧手）作为可直接加载的模型，包含其 MJCF 文件和 mesh。其他本机机器
+人模型、轨迹、工程、相机录像及生成的打包文件不会上传。Git 仍会忽略
+`model_library/*`，但会保留 README 以及内置的 `OpenArm_V1` 和 `OpenArm_O6`。
+克隆后可以直接双击其中一个模型，也可以通过以下方式添加其他模型：
 
 1. 使用 **File -> Import Model** 或 **Import Model Folder into Library**；或者
 2. 将完整模型目录复制到 `model_library/MyRobot/`，保留全部 mesh、纹理和

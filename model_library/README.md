@@ -1,6 +1,6 @@
 # 模型库
 
-仓库内置并跟踪 `OpenArm_V1/`，用于保证全新克隆后可以立即加载一个完整示例模型。
+仓库内置并跟踪 `OpenArm_V1/`（达妙夹爪）和 `OpenArm_O6/`（灵心 O6 灵巧手），用于保证全新克隆后可以立即加载完整示例模型。
 其他放入本目录的本地模型默认仍由 `.gitignore` 排除，不会意外提交。
 
 每个模型使用一个独立子文件夹，软件以子文件夹名称作为模型名称：
@@ -40,4 +40,4 @@ model_library/
 - `default_mapping`：轨迹通道到模型关节的默认映射；
 - 映射可包含`scale`、`offset`、`minimum`、`maximum`，用于单位换算、方向反转和限幅。
 
-`OpenArm_V1/model.json`是包含422mm肩宽与夹爪标定的完整示例。
+`OpenArm_V1/model.json` 是包含 422mm 肩宽与夹爪标定的完整示例。`OpenArm_O6/model.json` 保留同样的手臂通道，并用每只手 6 个主动手指关节名替换夹爪通道；DIP/IP 由 MCP/CMC 耦合，不单独映射。

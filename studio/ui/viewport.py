@@ -9,6 +9,36 @@ from PySide6.QtWidgets import QLabel, QSizePolicy
 from studio.models.adapter import MuJoCoModelAdapter
 from studio.ui.i18n import ui_text
 
+_MAX_MOUSE_STEP = 0.04  # mjv_moveCamera: 1.0 == 180°, keep each event under ~7°
+_DRAG_THRESHOLD_PX = 4.0
+
+
+def apply_overview_camera(model: mujoco.MjModel, camera: mujoco.MjvCamera) -> None:
+    """Place a free camera above the model, looking down at its center."""
+    mujoco.mjv_defaultFreeCamera(model, camera)
+    camera.type = int(mujoco.mjtCamera.mjCAMERA_FREE)
+    extent = max(float(model.stat.extent), 0.2)
+    camera.lookat[:] = model.stat.center
+    camera.distance = max(float(camera.distance), 1.6 * extent)
+    # Negative elevation looks down. XML defaults around -10 sit at hip height,
+    # and one oversized mouse jump can slam the camera through ±90°.
+    camera.elevation = min(float(camera.elevation), -25.0)
+
+
+def clamped_mouse_delta(delta_x: float, delta_y: float, height: float) -> tuple[float, float]:
+    scale = max(120.0, float(height))
+    rel_x = max(-_MAX_MOUSE_STEP, min(_MAX_MOUSE_STEP, delta_x / scale))
+    rel_y = max(-_MAX_MOUSE_STEP, min(_MAX_MOUSE_STEP, delta_y / scale))
+    return rel_x, rel_y
+
+
+def rgb_frame_for_qt(rgb: np.ndarray) -> np.ndarray:
+    """Return a C-contiguous RGB frame QImage can copy without stride traps."""
+    frame = np.ascontiguousarray(rgb)
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError("expected an HxWx3 RGB image")
+    return frame
+
 
 class MuJoCoViewport(QLabel):
     endEffectorDrag = Signal(float, float, float, bool)
@@ -18,7 +48,7 @@ class MuJoCoViewport(QLabel):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(640, 360)
+        self.setMinimumSize(240, 135)
         self.setText(ui_text("导入 MJCF/XML 或 URDF 模型"))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -33,6 +63,7 @@ class MuJoCoViewport(QLabel):
         self._last_image: QImage | None = None
         self._render_size = (0, 0)
         self._drag_position: QPointF | None = None
+        self._orbit_started = False
         self._end_effector_drag_enabled = False
         self._end_effector_adjusted = False
         self._resize_timer = QTimer(self)
@@ -47,11 +78,13 @@ class MuJoCoViewport(QLabel):
         self._last_image = None
         self.clear()
         self.adapter = adapter
+        self._drag_position = None
+        self._orbit_started = False
         if adapter is None:
             self.setText(ui_text("导入 MJCF/XML 或 URDF 模型"))
             return
         try:
-            mujoco.mjv_defaultFreeCamera(adapter.model, self.camera)
+            apply_overview_camera(adapter.model, self.camera)
             self._ensure_renderer(force=True)
             self.refresh()
         except Exception as error:
@@ -67,12 +100,12 @@ class MuJoCoViewport(QLabel):
                 return
             camera: mujoco.MjvCamera | str = self._named_camera or self.camera
             self.renderer.update_scene(self.adapter.data, camera=camera)
-            rgb = self.renderer.render()
+            rgb = rgb_frame_for_qt(self.renderer.render())
             image = QImage(
                 rgb.data,
                 rgb.shape[1],
                 rgb.shape[0],
-                rgb.strides[0],
+                int(rgb.strides[0]),
                 QImage.Format.Format_RGB888,
             ).copy()
             image.setDevicePixelRatio(self.devicePixelRatioF())
@@ -88,7 +121,7 @@ class MuJoCoViewport(QLabel):
 
     def reset_camera(self) -> None:
         if self.adapter is not None:
-            mujoco.mjv_defaultFreeCamera(self.adapter.model, self.camera)
+            apply_overview_camera(self.adapter.model, self.camera)
             self.refresh()
 
     def set_camera_view(self, camera_name: str | None) -> None:
@@ -110,14 +143,14 @@ class MuJoCoViewport(QLabel):
             return rotation[:, 0], rotation[:, 1], -rotation[:, 2]
         azimuth = np.deg2rad(self.camera.azimuth)
         elevation = np.deg2rad(self.camera.elevation)
-        radial = np.asarray(
+        forward = np.asarray(
             [
                 np.cos(elevation) * np.cos(azimuth),
                 np.cos(elevation) * np.sin(azimuth),
                 np.sin(elevation),
             ]
         )
-        forward = -radial / np.linalg.norm(radial)
+        forward = forward / np.linalg.norm(forward)
         right = np.cross(forward, np.asarray([0.0, 0.0, 1.0]))
         if np.linalg.norm(right) < 1e-9:
             right = np.asarray([1.0, 0.0, 0.0])
@@ -128,6 +161,7 @@ class MuJoCoViewport(QLabel):
     def set_end_effector_drag_enabled(self, enabled: bool) -> None:
         self._end_effector_drag_enabled = enabled
         self._drag_position = None
+        self._orbit_started = False
         self._end_effector_adjusted = False
         self.setCursor(
             Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor
@@ -143,6 +177,7 @@ class MuJoCoViewport(QLabel):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self._drag_position = event.position()
+        self._orbit_started = False
         self.setFocus()
         event.accept()
 
@@ -154,7 +189,13 @@ class MuJoCoViewport(QLabel):
         ):
             self.endEffectorDrag.emit(0.0, 0.0, 0.0, True)
         self._drag_position = None
+        self._orbit_started = False
         event.accept()
+
+    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self._drag_position = None
+        self._orbit_started = False
+        super().leaveEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if (
@@ -162,22 +203,29 @@ class MuJoCoViewport(QLabel):
             or self.adapter is None
             or self.renderer is None
         ):
-            self._end_effector_adjusted = True
             return
         delta = event.position() - self._drag_position
+        if not self._orbit_started:
+            if (
+                abs(float(delta.x())) < _DRAG_THRESHOLD_PX
+                and abs(float(delta.y())) < _DRAG_THRESHOLD_PX
+            ):
+                return
+            self._orbit_started = True
+            self._drag_position = event.position()
+            event.accept()
+            return
         self._drag_position = event.position()
         buttons = event.buttons()
+        rel_x, rel_y = clamped_mouse_delta(
+            float(delta.x()), float(delta.y()), float(self.height())
+        )
         if (
             self._end_effector_drag_enabled
             and buttons & Qt.MouseButton.LeftButton
         ):
-            scale = max(1.0, float(self.height()))
-            self.endEffectorDrag.emit(
-                float(delta.x()) / scale,
-                float(delta.y()) / scale,
-                0.0,
-                False,
-            )
+            self._end_effector_adjusted = True
+            self.endEffectorDrag.emit(rel_x, rel_y, 0.0, False)
             event.accept()
             return
         if buttons & Qt.MouseButton.RightButton:
@@ -191,12 +239,11 @@ class MuJoCoViewport(QLabel):
             action = mujoco.mjtMouse.mjMOUSE_ROTATE_H
         else:
             return
-        scale = max(1.0, float(self.height()))
         mujoco.mjv_moveCamera(
             self.adapter.model,
             action,
-            float(delta.x()) / scale,
-            float(delta.y()) / scale,
+            rel_x,
+            rel_y,
             self.camera,
         )
         self.refresh()
@@ -216,11 +263,12 @@ class MuJoCoViewport(QLabel):
             )
             event.accept()
             return
+        zoom = max(-_MAX_MOUSE_STEP, min(_MAX_MOUSE_STEP, 0.05 * float(steps)))
         mujoco.mjv_moveCamera(
             self.adapter.model,
             mujoco.mjtMouse.mjMOUSE_ZOOM,
             0.0,
-            0.05 * float(steps),
+            zoom,
             self.camera,
         )
         self.refresh()
@@ -251,9 +299,11 @@ class MuJoCoViewport(QLabel):
 
     def _desired_render_size(self) -> tuple[int, int]:
         pixel_ratio = self.devicePixelRatioF()
-        width = int(round(max(640, self.width()) * pixel_ratio))
-        height = int(round(max(360, self.height()) * pixel_ratio))
-        return min(width, 3840), min(height, 2160)
+        width = int(round(max(2, self.width()) * pixel_ratio))
+        height = int(round(max(2, self.height()) * pixel_ratio))
+        width -= width % 2
+        height -= height % 2
+        return max(2, min(width, 3840)), max(2, min(height, 2160))
 
     def _ensure_renderer(self, force: bool = False) -> None:
         if self.adapter is None:
@@ -292,14 +342,15 @@ class MuJoCoViewport(QLabel):
         if self._last_image is None:
             return
         pixmap = QPixmap.fromImage(self._last_image)
-        logical_size = pixmap.deviceIndependentSize()
-        if logical_size.width() > self.width() or logical_size.height() > self.height():
-            pixel_ratio = self.devicePixelRatioF()
+        pixel_ratio = self.devicePixelRatioF()
+        target_width = max(1, int(round(self.width() * pixel_ratio)))
+        target_height = max(1, int(round(self.height() * pixel_ratio)))
+        if pixmap.width() != target_width or pixmap.height() != target_height:
             pixmap = pixmap.scaled(
-                int(self.width() * pixel_ratio),
-                int(self.height() * pixel_ratio),
-                Qt.AspectRatioMode.KeepAspectRatio,
+                target_width,
+                target_height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.FastTransformation,
             )
-            pixmap.setDevicePixelRatio(pixel_ratio)
+        pixmap.setDevicePixelRatio(pixel_ratio)
         self.setPixmap(pixmap)

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QLabel,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -47,6 +48,10 @@ class TemperatureMonitor(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem("--"))
             self.table.setItem(row, 3, QTableWidgetItem("--"))
         self.table.resizeColumnsToContents()
+        self.table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.detection_mode)
         layout.addWidget(self.high_dynamics_mode)
         layout.addWidget(self.status)

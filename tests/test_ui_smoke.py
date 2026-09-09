@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractButton, QApplication, QDockWidget, QGroupBox
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
@@ -32,6 +32,25 @@ def test_main_window_starts() -> None:
     assert window.model_library.root.name == "model_library"
     assert window.model_library_list is not None
     window.close()
+
+
+def test_main_window_minimum_size_fits_laptop_screen() -> None:
+    application = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.timeline_widget.set_data(10.0, [f"q{i}" for i in range(36)], [])
+    application.processEvents()
+    hint = window.minimumSizeHint()
+    assert hint.width() <= 1100
+    assert hint.height() <= 700
+    window.show()
+    window._fit_to_available_screen()
+    application.processEvents()
+    window.showMaximized()
+    application.processEvents()
+    window._refresh_viewports_for_size()
+    assert window.minimumSizeHint().height() <= 700
+    window.close()
+    application.processEvents()
 
 
 def test_operation_validator_builds_baseline_report(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -526,3 +545,56 @@ def test_timeline_displays_label_title_instead_of_internal_id() -> None:
         )
         == "T002"
     )
+
+
+def test_loading_model_creates_part_module_inspectors(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("MOTION_STUDIO_LANG", raising=False)
+    application = QApplication.instance() or QApplication([])
+    model = tmp_path / "hand.xml"
+    model.write_text(
+        """<mujoco model="hand">
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="base">
+      <joint name="openarm_left_joint1" type="hinge" limited="true" range="-1 1"/>
+      <geom type="sphere" size=".02"/>
+      <body name="finger" pos="0 0 .05">
+        <joint name="lh_index_mcp_pitch" type="hinge" limited="true" range="0 1.6"/>
+        <geom type="capsule" size=".01" fromto="0 0 0 .05 0 0"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    window = MainWindow()
+    window._load_model_path(model)
+    assert window.source is not None
+    assert window.timeline_engine is not None
+    assert "lh_index_mcp_pitch" in window.source.position_channels
+    assert window.project.joint_mapping["lh_index_mcp_pitch"] == "lh_index_mcp_pitch"
+    modules = {str(module["id"]): module for module in window.part_module_host.modules}
+    assert "left_hand" in modules
+    assert "left_arm" in modules
+    dock_titles = [dock.windowTitle() for dock in window.findChildren(QDockWidget)]
+    assert "部件模块" in dock_titles
+    button_texts = [obj.text() for obj in window.findChildren(QAbstractButton)]
+    assert "打开" in button_texts
+    first = window.open_part_module("left_hand")
+    application.processEvents()
+    assert first is not None
+    assert first.windowTitle() == "左手"
+    assert "lh_index_mcp_pitch" in first.panel._joints
+    assert "openarm_left_joint1" not in first.panel._joints
+    group_titles = [box.title() for box in first.findChildren(QGroupBox)]
+    assert "食指" in group_titles
+    second = window.open_part_module("left_hand")
+    assert second is first
+    assert len(window.part_module_host.open_windows()) == 1
+    window._commit_joint_pose("lh_index_mcp_pitch", 0.7)
+    rendered = window.timeline_engine.render()
+    np.testing.assert_allclose(rendered.channels["lh_index_mcp_pitch"], 0.7)
+    window._set_dirty(False)
+    window.close()
+    application.processEvents()

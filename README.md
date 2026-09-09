@@ -35,7 +35,7 @@ On Ubuntu, install the common system packages with:
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-venv build-essential cmake iproute2
+sudo apt install python3 python3-venv build-essential cmake iproute2 libxcb-cursor0
 ```
 
 ### Clone and install
@@ -49,7 +49,9 @@ bash run.sh
 
 `install.sh` creates a repository-local `.venv`, installs the pinned packages
 from `requirements-lock.txt`, and installs the application in editable mode.
-It does not modify `vr_control` or another sibling repository. To select a
+It does not modify `vr_control` or another sibling repository. Python 3.12 or
+3.13 is required; conda `base` on Python 3.14 cannot install the locked wheels.
+The script prefers `python3.12` / `python3.13` over `python3`. To select a
 specific interpreter, run:
 
 ```bash
@@ -61,12 +63,13 @@ as a compatibility alias for existing shortcuts and starts the same UI.
 
 ### Models and trajectories are user data
 
-The repository includes `model_library/OpenArm_V1` as a ready-to-load fallback
-model, including its MJCF files and meshes. Other local robot models,
-trajectories, projects, camera recordings, and generated bundles are not
-published. `model_library/*` remains ignored by Git except for its README and
-the bundled `OpenArm_V1` model. After cloning, users can immediately
-double-click `OpenArm_V1`, or add another model by either:
+The repository includes `model_library/OpenArm_V1` (Damiao jaws) and
+`model_library/OpenArm_O6` (Linker Hand O6) as ready-to-load models, including
+MJCF files and meshes. Other local robot models, trajectories, projects, camera
+recordings, and generated bundles are not published. `model_library/*` remains
+ignored by Git except for its README and the bundled `OpenArm_V1` and
+`OpenArm_O6` models. After cloning, users can immediately double-click either
+model, or add another model by either:
 
 1. Use **File -> Import Model** or **Import Model Folder into Library**; or
 2. Copy a complete model folder into `model_library/MyRobot/`, preserving all

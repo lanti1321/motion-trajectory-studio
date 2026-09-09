@@ -1,11 +1,12 @@
-"""English-only UI normalization for static and dynamically created widgets.
+"""UI language at the presentation boundary.
 
-Legacy internal messages are translated at the presentation boundary so the
-editing and hardware paths do not need language-specific branches.
+Chinese is the default. Set MOTION_STUDIO_LANG=en to translate labels through
+the existing phrase table. Editing and hardware paths stay language-agnostic.
 """
 
 from __future__ import annotations
 
+import os
 import re
 
 from PySide6.QtCore import QEvent, QObject, QTimer
@@ -45,7 +46,26 @@ _EN = {
     "完整轨迹温度曲线（橙色 MOS / 蓝色转子）": "Full-Trajectory Temperature Curves (orange: MOS / blue: rotor)",
     "模型库（双击加载）": "Model Library (double-click to load)",
     "真机关节温度": "Hardware Joint Temperatures", "真机相机": "Hardware Camera",
-    "关节/通道": "Joints / Channels", "编辑工具": "Editing Tools",
+    "关节/通道": "Joints / Channels", "关节位姿": "Joint Pose", "编辑工具": "Editing Tools",
+    "部件模块": "Part Modules", "显示部件模块": "Show Part Modules", "打开": "Open",
+    "左手": "Left Hand", "右手": "Right Hand", "左臂": "Left Arm", "右臂": "Right Arm",
+    "其他关节": "Other Joints", "拇指": "Thumb", "食指": "Index", "中指": "Middle",
+    "无名指": "Ring", "小指": "Pinky", "其他": "Other",
+    "CMC 偏航": "CMC Yaw", "CMC 俯仰": "CMC Pitch",
+    "MCP 俯仰": "MCP Pitch", "MCP 偏航": "MCP Yaw", "MCP": "MCP",
+    "关节 1": "Joint 1", "关节 2": "Joint 2", "关节 3": "Joint 3",
+    "关节 4": "Joint 4", "关节 5": "Joint 5", "关节 6": "Joint 6",
+    "关节 7": "Joint 7", "夹爪 1": "Gripper 1", "夹爪 2": "Gripper 2",
+    "拇指 CMC 偏航": "Thumb CMC Yaw", "拇指 CMC 俯仰": "Thumb CMC Pitch",
+    "拇指 IP": "Thumb IP", "食指 MCP 俯仰": "Index MCP Pitch", "食指 DIP": "Index DIP",
+    "中指 MCP 俯仰": "Middle MCP Pitch", "中指 DIP": "Middle DIP",
+    "无名指 MCP 俯仰": "Ring MCP Pitch", "无名指 DIP": "Ring DIP",
+    "小指 MCP 俯仰": "Pinky MCP Pitch", "小指 DIP": "Pinky DIP",
+    "拖动滑条可预览灵巧手/手臂关节；松开后写入当前轨迹。": "Drag a slider to preview a hand or arm joint; release to write it into the current trajectory.",
+    "拖动滑条可预览；松开后写入当前轨迹。": "Drag a slider to preview; release to write it into the current trajectory.",
+    "在右侧「部件模块」点「打开」调节关节；": "On the right, click Open in Part Modules to pose joints; ",
+    "3D 窗口左键拖动只旋转视角。": "left-drag in the 3D view only rotates the camera.",
+    "请先加载模型": "Load a model first",
     "关节组": "Joint Groups", "空": "Empty", "快速关节组（Alt+1…Alt+9）": "Quick Joint Groups (Alt+1…Alt+9)",
     "保存/覆盖组": "Save / Overwrite Group", "重命名组": "Rename Group",
     "删除组": "Delete Group", "重命名关节组": "Rename Joint Group",
@@ -201,7 +221,8 @@ _REPLACEMENTS = sorted(
 
 
 def language() -> str:
-    return "en"
+    value = os.environ.get("MOTION_STUDIO_LANG", "zh").strip().lower()
+    return "en" if value == "en" else "zh"
 
 
 def ui_text(value: str) -> str:

@@ -137,3 +137,20 @@ def test_npz_export_rejects_reserved_channel_names(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="reserved metadata"):
         export_trajectory(data, tmp_path / "reserved.npz")
+
+
+def test_csv_treats_dexterous_hand_names_as_positions(tmp_path) -> None:
+    source = tmp_path / "o6_hands.csv"
+    source.write_text(
+        "time,q0,lh_index_mcp_pitch,rh_thumb_cmc_yaw\n"
+        "0,0.1,0.2,0.3\n"
+        "0.02,0.1,0.4,0.3\n",
+        encoding="utf-8",
+    )
+    loaded = load_trajectory(source)
+    assert loaded.position_channels == [
+        "q0",
+        "lh_index_mcp_pitch",
+        "rh_thumb_cmc_yaw",
+    ]
+    np.testing.assert_allclose(loaded.channels["lh_index_mcp_pitch"], [0.2, 0.4])

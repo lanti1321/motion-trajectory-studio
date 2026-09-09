@@ -10,4 +10,6 @@ model_library/*
 !model_library/README.md
 !model_library/OpenArm_V1/
 !model_library/OpenArm_V1/**
+!model_library/OpenArm_O6/
+!model_library/OpenArm_O6/**
 hardware_controller/build/

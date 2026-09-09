@@ -20,7 +20,10 @@ NPZ_RESERVED_NAMES = TIME_NAMES | {
 }
 VELOCITY_PATTERN = re.compile(r"^(?:dq|d_|velocity[_:]?|vel[_:]?)(.+)$", re.IGNORECASE)
 EFFORT_PATTERN = re.compile(r"^(?:tau|effort[_:]?|torque[_:]?)(.+)$", re.IGNORECASE)
-POSITION_PATTERN = re.compile(r"^(?:q\d+|position[_:]?.+|joint[_:]?.+)$", re.IGNORECASE)
+POSITION_PATTERN = re.compile(
+    r"^(?:q\d+|position[_:]?.+|joint[_:]?.+|lh_.+|rh_.+)$",
+    re.IGNORECASE,
+)
 
 
 def load_trajectory(path: str | Path, fallback_hz: float | None = None) -> TrajectoryData:

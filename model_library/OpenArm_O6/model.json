@@ -1,0 +1,41 @@
+{
+  "entry": "scene.xml",
+  "adjustments": [
+    {
+      "type": "joint_center_distance",
+      "joint_a": "openarm_left_joint2",
+      "joint_b": "openarm_right_joint2",
+      "body_a": "openarm_left_link0",
+      "body_b": "openarm_right_link0",
+      "distance_m": 0.422
+    }
+  ],
+  "default_mapping": {
+    "q0": {"joint": "openarm_left_joint1"},
+    "q1": {"joint": "openarm_left_joint2"},
+    "q2": {"joint": "openarm_left_joint3"},
+    "q3": {"joint": "openarm_left_joint4"},
+    "q4": {"joint": "openarm_left_joint5"},
+    "q5": {"joint": "openarm_left_joint6"},
+    "q6": {"joint": "openarm_left_joint7"},
+    "q8": {"joint": "openarm_right_joint1"},
+    "q9": {"joint": "openarm_right_joint2"},
+    "q10": {"joint": "openarm_right_joint3"},
+    "q11": {"joint": "openarm_right_joint4"},
+    "q12": {"joint": "openarm_right_joint5"},
+    "q13": {"joint": "openarm_right_joint6"},
+    "q14": {"joint": "openarm_right_joint7"},
+    "lh_thumb_cmc_yaw": {"joint": "lh_thumb_cmc_yaw"},
+    "lh_thumb_cmc_pitch": {"joint": "lh_thumb_cmc_pitch"},
+    "lh_index_mcp_pitch": {"joint": "lh_index_mcp_pitch"},
+    "lh_middle_mcp_pitch": {"joint": "lh_middle_mcp_pitch"},
+    "lh_ring_mcp_pitch": {"joint": "lh_ring_mcp_pitch"},
+    "lh_pinky_mcp_pitch": {"joint": "lh_pinky_mcp_pitch"},
+    "rh_thumb_cmc_yaw": {"joint": "rh_thumb_cmc_yaw"},
+    "rh_thumb_cmc_pitch": {"joint": "rh_thumb_cmc_pitch"},
+    "rh_index_mcp_pitch": {"joint": "rh_index_mcp_pitch"},
+    "rh_middle_mcp_pitch": {"joint": "rh_middle_mcp_pitch"},
+    "rh_ring_mcp_pitch": {"joint": "rh_ring_mcp_pitch"},
+    "rh_pinky_mcp_pitch": {"joint": "rh_pinky_mcp_pitch"}
+  }
+}

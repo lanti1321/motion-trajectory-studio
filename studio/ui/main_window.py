@@ -7,8 +7,15 @@ import subprocess
 import time
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QGuiApplication,
+    QKeySequence,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -23,6 +30,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSplitter,
     QToolBar,
@@ -38,8 +46,21 @@ from studio.io.trajectory_io import load_trajectory
 from studio.hardware.openarm_replay import OpenArmReplayClient
 from studio.models.adapter import MuJoCoModelAdapter, auto_map_channels
 from studio.models.library import ModelLibrary
+from studio.models.pose import (
+    channel_mapping_for_joints,
+    channel_value_from_joint,
+    default_joint_groups,
+    extend_trajectory_with_constants,
+    hold_pose_trajectory,
+    independent_joint_positions,
+    independent_scalar_joints,
+    joint_pose_patch_operation,
+    joint_value_from_channel,
+    scalar_joint_positions,
+)
 from studio.ui.mapping_dialog import JointMappingDialog
 from studio.ui.jog_teach_dialog import JogTeachDialog
+from studio.ui.part_modules import PartModuleHost
 from studio.ui.timeline_widget import TimelineWidget
 from studio.ui.viewport import MuJoCoViewport
 from studio.ui.temperature_monitor import TemperatureCurveDialog, TemperatureMonitor
@@ -59,6 +80,18 @@ from studio.validation.checks import (
 )
 
 
+def _scrollable_dock_content(widget: QWidget) -> QScrollArea:
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    scroll.setWidget(widget)
+    scroll.setMinimumSize(160, 80)
+    scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
+    return scroll
+
+
 class MainWindow(
     HardwareControlMixin,
     ProjectActionsMixin,
@@ -71,6 +104,7 @@ class MainWindow(
         super().__init__()
         self.setWindowTitle("Motion Trajectory Studio")
         self.resize(1500, 940)
+        self._did_fit_to_screen = False
         self.project = ProjectDocument("未命名工程")
         self.adapter: MuJoCoModelAdapter | None = None
         self.source: TrajectoryData | None = None
@@ -119,10 +153,11 @@ class MainWindow(
             self._cancel_end_effector_drag
         )
         self.camera_preview = MuJoCoViewport()
-        self.camera_preview.setMinimumSize(320, 180)
+        self.camera_preview.setMinimumSize(160, 90)
         self.camera_preview.hide()
         self._end_effector_drag_context: dict[str, object] | None = None
         self._jog_teach_dialog: JogTeachDialog | None = None
+        self._joint_pose_dragging: str | None = None
         self._pending_drag_delta = np.zeros(3)
         self._last_drag_update_at = 0.0
         self.timeline_widget = TimelineWidget()
@@ -201,6 +236,9 @@ class MainWindow(
         )
 
         self.model_library_list = QListWidget()
+        self.model_library_list.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
+        )
         self.model_library_list.itemDoubleClicked.connect(self._load_library_item)
         model_library_widget = QWidget()
         model_library_layout = QVBoxLayout(model_library_widget)
@@ -214,10 +252,13 @@ class MainWindow(
         refresh_models_button.clicked.connect(lambda: self.refresh_model_library(force=True))
         model_library_layout.addWidget(refresh_models_button)
         model_library_dock = QDockWidget("模型库（双击加载）", self)
-        model_library_dock.setWidget(model_library_widget)
+        model_library_dock.setWidget(_scrollable_dock_content(model_library_widget))
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, model_library_dock)
 
         self.channel_list = QListWidget()
+        self.channel_list.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
+        )
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.channel_list.itemSelectionChanged.connect(
             self._on_channel_selection_changed
@@ -258,7 +299,7 @@ class MainWindow(
         group_buttons.addWidget(delete_group)
         channel_layout.addLayout(group_buttons)
         channel_dock = QDockWidget("关节/通道", self)
-        channel_dock.setWidget(channel_widget)
+        channel_dock.setWidget(_scrollable_dock_content(channel_widget))
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, channel_dock)
         self.splitDockWidget(model_library_dock, channel_dock, Qt.Orientation.Vertical)
 
@@ -296,15 +337,29 @@ class MainWindow(
             properties_layout.addWidget(button)
         properties_layout.addStretch(1)
         properties_dock = QDockWidget("编辑工具", self)
-        properties_dock.setWidget(properties)
+        properties_dock.setWidget(_scrollable_dock_content(properties))
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, properties_dock)
+
+        self.part_module_host = PartModuleHost(
+            self, self._preview_joint_pose, self._commit_joint_pose
+        )
+        self.part_module_dock = QDockWidget("部件模块", self)
+        self.part_module_dock.setWidget(
+            _scrollable_dock_content(self.part_module_host.catalog)
+        )
+        self.addDockWidget(
+            Qt.DockWidgetArea.RightDockWidgetArea, self.part_module_dock
+        )
 
         self.temperature_monitor = TemperatureMonitor()
         temperature_dock = QDockWidget("真机关节温度", self)
-        temperature_dock.setWidget(self.temperature_monitor)
+        temperature_dock.setWidget(_scrollable_dock_content(self.temperature_monitor))
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, temperature_dock)
         self.splitDockWidget(
-            properties_dock, temperature_dock, Qt.Orientation.Vertical
+            properties_dock, self.part_module_dock, Qt.Orientation.Vertical
+        )
+        self.splitDockWidget(
+            self.part_module_dock, temperature_dock, Qt.Orientation.Vertical
         )
 
         self._build_actions()
@@ -352,6 +407,8 @@ class MainWindow(
             action.setShortcut(shortcut)
             action.triggered.connect(handler)
             edit_menu.addAction(action)
+        self.part_module_menu = self.menuBar().addMenu("部件模块")
+        self._refresh_part_module_menu()
         self.joint_group_menu = self.menuBar().addMenu("关节组")
         self._joint_group_actions: list[QAction] = []
         for slot in range(9):
@@ -442,6 +499,9 @@ class MainWindow(
         self._refresh_camera_selector()
         self.channel_list.clear()
         self._update_motor_scope_status()
+        self.part_module_host.clear()
+        self._refresh_part_module_menu()
+        self._joint_pose_dragging = None
         self.timeline_widget.clear_label_selection()
         self.timeline_widget.clear_selected_range(emit=False)
         self.timeline_widget.set_data(0.0, [], [])
@@ -492,11 +552,15 @@ class MainWindow(
             self.project.model_path = str(Path(path).expanduser().resolve())
             self._install_timeline_validator()
             self._set_dirty(True)
-            self.statusBar().showMessage(
-                f"已加载 {Path(path).parent.name}: "
-                f"{self.adapter.info.format}, {len(self.adapter.info.joints)} joints"
-            )
+            self._sync_model_pose_session()
             self._maybe_configure_mapping()
+            self._reload_part_modules()
+            self._apply_current_frame()
+            self.statusBar().showMessage(
+                f"已加载 {Path(path).parent.name}。"
+                "在右侧「部件模块」点「打开」调节关节；"
+                "3D 窗口左键拖动只旋转视角。"
+            )
         except Exception as error:
             self.adapter = previous_adapter
             if previous_adapter is not None:
@@ -693,6 +757,8 @@ class MainWindow(
             + (" (非均匀)" if frequency.irregular else "")
         )
         self._maybe_configure_mapping()
+        self._ensure_independent_joint_channels()
+        self._reload_part_modules()
         self._apply_current_frame()
         self._set_dirty(True)
 
@@ -723,6 +789,234 @@ class MainWindow(
             )
         if len(self.project.joint_mapping) < len(self.source.position_channels):
             self.configure_mapping()
+
+    def _sync_model_pose_session(self) -> None:
+        if self.adapter is None:
+            return
+        generated = bool(
+            self.source is not None
+            and self.source.metadata.get("generated_hold_pose")
+        )
+        if self.source is None or (generated and not self.project.operations):
+            self._install_rest_pose()
+            return
+        self._ensure_independent_joint_channels()
+
+    def _install_rest_pose(self) -> None:
+        if self.adapter is None:
+            return
+        joints = independent_scalar_joints(self.adapter.info)
+        if not joints:
+            return
+        mapping = channel_mapping_for_joints(
+            [joint.name for joint in joints],
+            self.project.joint_mapping,
+        )
+        positions = independent_joint_positions(self.adapter)
+        source = hold_pose_trajectory(
+            {
+                channel: positions.get(joint_name, 0.0)
+                for channel, joint_name in mapping.items()
+            }
+        )
+        source.metadata["generated_hold_pose"] = True
+        self.source = source
+        self.timeline_engine = TimelineEngine(
+            source, validator=self._operation_validator
+        )
+        self.project.joint_mapping = mapping
+        self.project.mapping_transforms = {
+            channel: dict(transform)
+            for channel, transform in self.project.mapping_transforms.items()
+            if channel in mapping
+        }
+        self.project.trajectory_path = None
+        if not self.project.joint_groups:
+            self.project.joint_groups = default_joint_groups(mapping)
+        self.frame = 0
+        self.channel_list.clear()
+        self.channel_list.addItems(source.position_channels)
+        self._update_motor_scope_status()
+        self._refresh_timeline()
+
+    def _ensure_independent_joint_channels(self) -> None:
+        if self.adapter is None or self.source is None:
+            return
+        positions = independent_joint_positions(self.adapter)
+        mapped_joints = set(self.project.joint_mapping.values())
+        extras: dict[str, float] = {}
+        for joint in independent_scalar_joints(self.adapter.info):
+            if joint.name in mapped_joints:
+                continue
+            self.project.joint_mapping[joint.name] = joint.name
+            extras[joint.name] = positions.get(joint.name, 0.0)
+        extended = extend_trajectory_with_constants(self.source, extras)
+        if extended is not self.source:
+            operations = (
+                list(self.timeline_engine.operations)
+                if self.timeline_engine is not None
+                else []
+            )
+            labels = (
+                list(self.timeline_engine.labels)
+                if self.timeline_engine is not None
+                else list(self.project.labels)
+            )
+            self.source = extended
+            self.timeline_engine = TimelineEngine(
+                extended,
+                operations,
+                labels,
+                self._operation_validator,
+            )
+            self.channel_list.clear()
+            self.channel_list.addItems(extended.position_channels)
+            self._update_motor_scope_status()
+            self._refresh_timeline()
+        if not self.project.joint_groups:
+            self.project.joint_groups = default_joint_groups(
+                self.project.joint_mapping
+            )
+            self._refresh_joint_group_controls()
+
+    def _reload_part_modules(self) -> None:
+        if self.adapter is None:
+            self.part_module_host.clear()
+            self._refresh_part_module_menu()
+            return
+        self.part_module_host.set_joints(
+            independent_scalar_joints(self.adapter.info)
+        )
+        self._refresh_part_module_menu()
+        self._sync_part_module_windows_from_frame()
+
+    def open_part_module(self, module_id: str):
+        window = self.part_module_host.open_module(module_id)
+        if window is not None:
+            self.part_module_dock.show()
+            self._sync_part_module_windows_from_frame()
+        return window
+
+    def _refresh_part_module_menu(self) -> None:
+        menu = getattr(self, "part_module_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        show_dock = QAction("显示部件模块", self)
+        show_dock.triggered.connect(self.part_module_dock.show)
+        menu.addAction(show_dock)
+        modules = self.part_module_host.modules
+        if not modules:
+            return
+        menu.addSeparator()
+        for module in modules:
+            count = len(list(module["joint_names"]))  # type: ignore[arg-type]
+            action = QAction(f"{module['title']} ({count})", self)
+            action.triggered.connect(
+                lambda _checked=False, mid=str(module["id"]): self.open_part_module(mid)
+            )
+            menu.addAction(action)
+
+    def _mapped_joint_values_at_current_frame(self) -> dict[str, float]:
+        if self.adapter is None:
+            return {}
+        values = scalar_joint_positions(self.adapter)
+        data = self._rendered()
+        if data is None:
+            return values
+        frame = int(np.clip(self.frame, 0, data.frame_count - 1))
+        for channel, joint_name in self.project.joint_mapping.items():
+            if channel not in data.channels:
+                continue
+            values[joint_name] = joint_value_from_channel(
+                float(data.channels[channel][frame]),
+                self.project.mapping_transforms.get(channel, {}),
+            )
+        return values
+
+    def _sync_part_module_windows_from_frame(self) -> None:
+        self.part_module_host.set_values(
+            self._mapped_joint_values_at_current_frame(),
+            skip=self._joint_pose_dragging,
+        )
+
+    def _channel_for_joint(self, joint_name: str) -> str | None:
+        for channel, mapped in self.project.joint_mapping.items():
+            if mapped == joint_name:
+                return channel
+        return None
+
+    def _preview_joint_pose(self, joint_name: str, radians: float) -> None:
+        if self.adapter is None:
+            return
+        self.playing = False
+        self._joint_pose_dragging = joint_name
+        values = self._mapped_joint_values_at_current_frame()
+        values[joint_name] = radians
+        try:
+            self.adapter.apply_positions(values)
+            self.viewport.refresh()
+            if self.camera_preview.isVisible():
+                self.camera_preview.refresh()
+        except Exception as error:
+            self.statusBar().showMessage(str(error))
+
+    def _commit_joint_pose(self, joint_name: str, radians: float) -> None:
+        self._joint_pose_dragging = None
+        if self.adapter is None:
+            return
+        if self.source is None or self.timeline_engine is None:
+            self._install_rest_pose()
+        channel = self._channel_for_joint(joint_name)
+        if channel is None:
+            self.project.joint_mapping[joint_name] = joint_name
+            if self.source is not None:
+                extended = extend_trajectory_with_constants(
+                    self.source, {joint_name: radians}
+                )
+                self.source = extended
+                self.timeline_engine = TimelineEngine(
+                    extended,
+                    list(self.timeline_engine.operations)
+                    if self.timeline_engine is not None
+                    else [],
+                    list(self.timeline_engine.labels)
+                    if self.timeline_engine is not None
+                    else [],
+                    self._operation_validator,
+                )
+                self.channel_list.clear()
+                self.channel_list.addItems(extended.position_channels)
+            channel = joint_name
+        named = {joint.name: joint for joint in self.adapter.info.joints}
+        joint = named.get(joint_name)
+        if joint is not None and joint.lower is not None:
+            radians = max(radians, joint.lower)
+        if joint is not None and joint.upper is not None:
+            radians = min(radians, joint.upper)
+        try:
+            channel_value = channel_value_from_joint(
+                radians,
+                self.project.mapping_transforms.get(channel, {}),
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "部件模块", str(error))
+            self._sync_part_module_windows_from_frame()
+            return
+        data = self._rendered()
+        if data is None or channel not in data.channels:
+            self._preview_joint_pose(joint_name, radians)
+            self._joint_pose_dragging = None
+            return
+        operation = joint_pose_patch_operation(
+            data, channel, channel_value, self.frame
+        )
+        if self._add_operation(operation):
+            self.statusBar().showMessage(
+                f"已写入 {joint_name} = {radians:.4f} rad"
+            )
+        else:
+            self._sync_part_module_windows_from_frame()
 
     def _rendered(self) -> TrajectoryData | None:
         return self.timeline_engine.render() if self.timeline_engine else None
@@ -799,6 +1093,7 @@ class MainWindow(
                     self.camera_preview.refresh()
             except Exception as error:
                 self.statusBar().showMessage(str(error))
+        self._sync_part_module_windows_from_frame()
 
     def seek_frame(self, frame: int) -> None:
         data = self._rendered()
@@ -891,10 +1186,42 @@ class MainWindow(
             return self.save_project()
         return True
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._did_fit_to_screen:
+            self._did_fit_to_screen = True
+            self._fit_to_available_screen()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            QTimer.singleShot(0, self._refresh_viewports_for_size)
+
+    def _fit_to_available_screen(self) -> None:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        chrome_w = max(0, frame.width() - self.width())
+        chrome_h = max(0, frame.height() - self.height())
+        width = min(self.width(), max(640, available.width() - chrome_w))
+        height = min(self.height(), max(480, available.height() - chrome_h))
+        x = available.x() + max(0, (available.width() - width - chrome_w) // 2)
+        y = available.y() + max(0, (available.height() - height - chrome_h) // 2)
+        self.setGeometry(x, y, width, height)
+
+    def _refresh_viewports_for_size(self) -> None:
+        for view in (self.viewport, self.camera_preview):
+            view._resize_timer.stop()
+            view._set_scaled_pixmap()
+            view._resize_renderer()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self._confirm_discard_or_save():
             event.ignore()
             return
+        self.part_module_host.close_all()
         self.viewport._close_renderer()
         self.camera_preview._close_renderer()
         self.camera_monitor.disconnect_all()
