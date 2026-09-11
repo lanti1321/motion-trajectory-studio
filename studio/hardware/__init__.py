@@ -1,0 +1,1 @@
+"""Hardware integration adapters."""

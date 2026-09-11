@@ -1,0 +1,43 @@
+<!--
+OpenArm bimanual scene with a simple front table for Quest Cartesian teleop sim.
+Arms start in a table-ready posture (elbow ~90 deg) via controller set_home, not keyframe.
+-->
+<mujoco model="openarm_bimanual_table_scene">
+  <include file="openarm_bimanual.xml"/>
+
+  <statistic center="0.35 0 0.45" extent="1.0" meansize="0.05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="150" elevation="-25"/>
+    <quality shadowsize="8192"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <material name="table_top" rgba="0.55 0.42 0.28 1" reflectance="0.08" shininess="0.15"/>
+    <material name="table_leg" rgba="0.25 0.25 0.28 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Table top surface at z ≈ 0.48 m (shoulder ~0.70 m). Was 0.72 m and sat above the arms. -->
+    <geom name="table_top" type="box" pos="0.48 0 0.46" size="0.32 0.45 0.02"
+          material="table_top" contype="1" conaffinity="1" friction="1 0.005 0.001"
+          solref="0.02 1" solimp="0.9 0.95 0.001"/>
+    <geom name="table_leg_fl" type="box" pos="0.28  0.35 0.22" size="0.03 0.03 0.22" material="table_leg"
+          contype="0" conaffinity="0"/>
+    <geom name="table_leg_fr" type="box" pos="0.28 -0.35 0.22" size="0.03 0.03 0.22" material="table_leg"
+          contype="0" conaffinity="0"/>
+    <geom name="table_leg_bl" type="box" pos="0.68  0.35 0.22" size="0.03 0.03 0.22" material="table_leg"
+          contype="0" conaffinity="0"/>
+    <geom name="table_leg_br" type="box" pos="0.68 -0.35 0.22" size="0.03 0.03 0.22" material="table_leg"
+          contype="0" conaffinity="0"/>
+  </worldbody>
+</mujoco>
