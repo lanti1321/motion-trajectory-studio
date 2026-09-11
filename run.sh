@@ -8,4 +8,5 @@ else
   PYTHON="${MOTION_STUDIO_PYTHON:-$(command -v python3)}"
 fi
 
+export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 exec "${PYTHON}" "${ROOT}/app.py" "$@"
